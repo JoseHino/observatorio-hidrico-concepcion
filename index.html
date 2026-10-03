@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Observatorio Hídrico · La Concepción</title>
+<meta name="description" content="Reserva, cota y precipitaciones del embalse de La Concepción (Istán, Málaga). Datos de REDIAM y la Red Hidrosur con actualización diaria automática.">
+
+<!-- Tipografía del kit. Si no carga, la pila de respaldo mantiene el diseño. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%232a78d6'/%3E%3Cpath d='M5 6v12h13' stroke='white' stroke-width='1.9' fill='none' stroke-linecap='round'/%3E%3Cpath d='m8 14 3-3 3 3 4-6' stroke='white' stroke-width='1.9' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;650&display=swap" rel="stylesheet">
+
+<!-- Kit: no se toca por observatorio -->
+<link rel="stylesheet" href="assets/obs.css">
+
+<!-- Ajustes de marca de ESTE observatorio. Es el único sitio donde tocar color. -->
+<style>
+  :root { --brand: #1f6fb2; --brand-ink: #175690; --brand-soft: #e8f1fa; }
+</style>
+</head>
+<body>
+
+<div id="obs-app"></div>
+
+<!-- Librería de gráficas -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+<!-- Kit -->
+<script src="assets/obs-charts.js"></script>
+<script src="assets/obs-ui.js"></script>
+<!-- Datos (los escribe pipeline/build_data.py) -->
+<script src="data/data.js"></script>
+<!-- Declaración de ESTE observatorio -->
+<script src="app.js"></script>
+
+</body>
+</html>
