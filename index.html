@@ -19,6 +19,11 @@
 <!-- Ajustes de marca de ESTE observatorio. Es el único sitio donde tocar color. -->
 <style>
   :root { --brand: #1f6fb2; --brand-ink: #175690; --brand-soft: #e8f1fa; }
+  /* Una sola vista: la barra de pestanas no aporta nada. */
+  .obs-nav { display: none; }
+  /* La tarjeta de lluvia lleva selector de estacion: en movil la cabecera
+     pasa a dos lineas en vez de salirse de la pantalla. */
+  @media (max-width: 560px) { .obs-card-head { flex-wrap: wrap; } .obs-card-head .t { flex-basis: 100%; } }
 </style>
 </head>
 <body>
