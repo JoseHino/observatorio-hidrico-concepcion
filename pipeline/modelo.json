@@ -1,22 +1,22 @@
 {
-  "tipo": "SCS numero de curva por episodios de 7 dias",
+  "tipo": "SCS numero de curva por temporales (datos horarios)",
   "ajustado": "2026-10-03",
   "pluviometro": "016P01",
-  "episodios": 149,
-  "desde": "2000-01-14",
-  "hasta": "2026-04-06",
-  "umbral_3d_mm": 30,
+  "episodios": 167,
+  "desde": "2000-01-13",
+  "hasta": "2026-04-07",
+  "umbral_mm": 30,
+  "retardo_mediano_h": 130,
   "parametros": {
-    "a": 0.1882,
-    "S0": 433.0,
-    "beta": 90.7,
+    "a": 0.1312,
+    "S0": 758.3,
+    "beta": 49.7,
     "lambda": 0.05,
-    "Vtecho": 56.39
+    "Vtecho": 56.6
   },
-  "r2_total": 0.635,
-  "r2_validacion": 0.563,
-  "error_medio_validacion_hm3": 3.16,
-  "episodios_validacion": 45,
+  "r2_validacion": 0.632,
+  "error_medio_validacion_hm3": 2.07,
+  "validacion": "dejando fuera cada ano",
   "error_p10": -3.35,
-  "error_p90": 4.39
+  "error_p90": 3.57
 }

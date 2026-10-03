@@ -85,32 +85,39 @@ def guardar_cache(c):
 
 def leer_horario(anio):
     """Los ficheros publicados data/horario/AAAA.js hacen de cache: se leen,
-    se completan con las horas nuevas y se reescriben."""
-    vacio = {"vol": {}, "lluvia": {}}
+    se completan con las horas nuevas y se reescriben.
+
+    En memoria: {"vol": {"AAAA-MM-DDTHH": hm3}, "<pluviometro>": {hora: mm}, ...}"""
     ruta = os.path.join(SALIDA_HORARIO, f"{anio}.js")
     if not os.path.exists(ruta):
-        return vacio
+        return {}
     try:
         txt = open(ruta, encoding="utf-8").read()
         H = json.loads(re.search(r"=\s*(\{.*\});?\s*$", txt, re.S).group(1))
     except Exception:                                             # noqa: BLE001
-        return vacio
+        return {}
     t0 = datetime.datetime.strptime(H["inicio"], "%Y-%m-%dT%H")
-    out = {"vol": {}, "lluvia": {}}
-    for clave in out:
-        for i, v in enumerate(H.get(clave, [])):
-            if v is not None:
-                out[clave][(t0 + datetime.timedelta(hours=i)).strftime("%Y-%m-%dT%H")] = v
+    series = {"vol": H.get("vol", [])}
+    ll = H.get("lluvia", {})
+    if isinstance(ll, list):                 # formato antiguo: solo la presa
+        ll = {PLUVIO_REF: ll}
+    series.update(ll)
+    out = {}
+    for clave, vals in series.items():
+        out[clave] = {(t0 + datetime.timedelta(hours=i)).strftime("%Y-%m-%dT%H"): v
+                      for i, v in enumerate(vals) if v is not None}
     return out
 
 
 def guardar_horario(anio, h):
-    """data/horario/AAAA.js: volumen y lluvia de cada hora del ano, como listas
-    desde el 1 de enero a las 00 (null = hora sin dato). La web solo descarga
-    los anos que necesita para el periodo elegido."""
+    """data/horario/AAAA.js: volumen y lluvia de cada pluviometro hora a hora,
+    como listas desde el 1 de enero a las 00 (null = hora sin dato). La web
+    solo descarga los anos que necesita para el periodo elegido."""
     os.makedirs(SALIDA_HORARIO, exist_ok=True)
     t0 = datetime.datetime(int(anio), 1, 1)
-    claves = h.get("vol", {}).keys() | h.get("lluvia", {}).keys()
+    claves = set()
+    for s in h.values():
+        claves |= s.keys()
     if not claves:
         return
     ultima = datetime.datetime.strptime(max(claves), "%Y-%m-%dT%H")
@@ -118,7 +125,8 @@ def guardar_horario(anio, h):
     ks = [(t0 + datetime.timedelta(hours=i)).strftime("%Y-%m-%dT%H") for i in range(n)]
     datos = {"inicio": f"{anio}-01-01T00",
              "vol": [r(h.get("vol", {}).get(k)) for k in ks],
-             "lluvia": [r(h.get("lluvia", {}).get(k), 1) for k in ks]}
+             "lluvia": {p["id"]: [r(h.get(p["id"], {}).get(k), 1) for k in ks]
+                        for p in PLUVIOMETROS if h.get(p["id"])}}
     with open(os.path.join(SALIDA_HORARIO, f"{anio}.js"), "w", encoding="utf-8") as f:
         f.write("/* Generado por pipeline/build_data.py - no editar a mano. */\n")
         f.write(f"(window.HORARIO = window.HORARIO || {{}})['{anio}'] = ")
@@ -196,17 +204,18 @@ def recoger(todo=False):
         fallos.append(f"Hidrosur cota: {e}")
         aviso(str(e))
 
-    paso("Red Hidrosur - lluvia horaria en la presa")
-    try:
-        ref = next(p for p in PLUVIOMETROS if p["id"] == PLUVIO_REF)
-        u = None if todo else ultima_hora("lluvia")
-        ini = HISTORICO_DESDE if u is None else u - datetime.timedelta(days=SOLAPE_DIAS)
-        nuevo = hidrosur.horaria(ref["est"], ref["id"], ini, HOY)
-        anios_tocados |= volcar_horario(nuevo, lambda v: [("lluvia", v[0])] if 0 <= v[0] < 300 else [])
-        ok(f"{len(nuevo)} horas desde {ini}")
-    except Exception as e:                                        # noqa: BLE001
-        fallos.append(f"Hidrosur lluvia horaria: {e}")
-        aviso(str(e))
+    paso("Red Hidrosur - lluvia horaria de cada pluviometro")
+    for p in PLUVIOMETROS:
+        try:
+            u = None if todo else ultima_hora(p["id"])
+            ini = HISTORICO_DESDE if u is None else u - datetime.timedelta(days=SOLAPE_DIAS)
+            nuevo = hidrosur.horaria(p["est"], p["id"], ini, HOY)
+            anios_tocados |= volcar_horario(
+                nuevo, lambda v, c=p["id"]: [(c, v[0])] if 0 <= v[0] < 300 else [])
+            ok(f"{p['nombre']}: {len(nuevo)} horas desde {ini}")
+        except Exception as e:                                    # noqa: BLE001
+            fallos.append(f"Hidrosur lluvia horaria {p['id']}: {e}")
+            aviso(f"{p['nombre']}: {e}")
 
     if anios_tocados:
         ok(f"horario: {len(anios_tocados)} ano(s) actualizados en data/horario/")
