@@ -24,6 +24,27 @@
   /* La tarjeta de lluvia lleva selector de estacion: en movil la cabecera
      pasa a dos lineas en vez de salirse de la pantalla. */
   @media (max-width: 560px) { .obs-card-head { flex-wrap: wrap; } .obs-card-head .t { flex-basis: 100%; } }
+
+  /* Calculadora de riesgo de llenado (bloque propio de este observatorio). */
+  .hidrico-sim { margin-top: 16px; }
+  .hidrico-sim-in { padding: 14px 17px 0; display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; }
+  .hidrico-sim-in label { display: inline-flex; align-items: center; gap: 10px; }
+  .hidrico-sim-in label > span:first-child { color: var(--ink-mut); font-size: 12px; font-weight: 600; }
+  .hidrico-sim-campo { font-weight: 600; color: var(--ink); }
+  .hidrico-sim-campo input { width: 90px; font: inherit; font-size: 16px; padding: 6px 8px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--surface); color: var(--ink); }
+  .hidrico-sim-in input[type="range"] { flex: 1 1 220px; accent-color: var(--brand); cursor: pointer; }
+  .hidrico-sim-out { padding: 16px 17px 4px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .hidrico-sim-out .v { font-size: 22px; font-weight: 650; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .hidrico-sim-out .l { font-size: 12px; color: var(--ink-mut); margin-top: 2px; }
+  .hidrico-sim-nivel { grid-column: 1 / -1; padding: 10px 12px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    border-left: 4px solid; background: var(--brand-soft); color: var(--ink); }
+  .hidrico-sim-nivel.ok { border-color: var(--ok); }
+  .hidrico-sim-nivel.warn { border-color: var(--warn); }
+  .hidrico-sim-nivel.crit { border-color: var(--crit); }
+  .hidrico-sim-ecu { padding: 12px 17px 16px; font-size: 12px; line-height: 1.6; color: var(--ink-2); }
+  .hidrico-sim-ecu code { font-size: 12px; background: var(--brand-soft); padding: 1px 5px; border-radius: 4px; color: var(--ink); }
+  @media (max-width: 560px) { .hidrico-sim-out { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>

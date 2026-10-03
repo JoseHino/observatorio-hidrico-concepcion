@@ -50,6 +50,8 @@ SOLAPE_DIAS = 20                         # se repiden para recoger correcciones
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SALIDA = os.path.join(RAIZ, "data", "data.js")
 CACHE = os.path.join(RAIZ, "pipeline", "cache", "hidrosur.json")
+SALIDA_HORARIO = os.path.join(RAIZ, "data", "horario")              # un .js por ano
+MODELO = os.path.join(RAIZ, "pipeline", "modelo.json")              # ecuacion lluvia-volumen
 
 HOY = datetime.date.today()
 
@@ -81,6 +83,74 @@ def guardar_cache(c):
         json.dump(c, f, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
+def leer_horario(anio):
+    """Los ficheros publicados data/horario/AAAA.js hacen de cache: se leen,
+    se completan con las horas nuevas y se reescriben."""
+    vacio = {"vol": {}, "lluvia": {}}
+    ruta = os.path.join(SALIDA_HORARIO, f"{anio}.js")
+    if not os.path.exists(ruta):
+        return vacio
+    try:
+        txt = open(ruta, encoding="utf-8").read()
+        H = json.loads(re.search(r"=\s*(\{.*\});?\s*$", txt, re.S).group(1))
+    except Exception:                                             # noqa: BLE001
+        return vacio
+    t0 = datetime.datetime.strptime(H["inicio"], "%Y-%m-%dT%H")
+    out = {"vol": {}, "lluvia": {}}
+    for clave in out:
+        for i, v in enumerate(H.get(clave, [])):
+            if v is not None:
+                out[clave][(t0 + datetime.timedelta(hours=i)).strftime("%Y-%m-%dT%H")] = v
+    return out
+
+
+def guardar_horario(anio, h):
+    """data/horario/AAAA.js: volumen y lluvia de cada hora del ano, como listas
+    desde el 1 de enero a las 00 (null = hora sin dato). La web solo descarga
+    los anos que necesita para el periodo elegido."""
+    os.makedirs(SALIDA_HORARIO, exist_ok=True)
+    t0 = datetime.datetime(int(anio), 1, 1)
+    claves = h.get("vol", {}).keys() | h.get("lluvia", {}).keys()
+    if not claves:
+        return
+    ultima = datetime.datetime.strptime(max(claves), "%Y-%m-%dT%H")
+    n = int((ultima - t0).total_seconds() // 3600) + 1
+    ks = [(t0 + datetime.timedelta(hours=i)).strftime("%Y-%m-%dT%H") for i in range(n)]
+    datos = {"inicio": f"{anio}-01-01T00",
+             "vol": [r(h.get("vol", {}).get(k)) for k in ks],
+             "lluvia": [r(h.get("lluvia", {}).get(k), 1) for k in ks]}
+    with open(os.path.join(SALIDA_HORARIO, f"{anio}.js"), "w", encoding="utf-8") as f:
+        f.write("/* Generado por pipeline/build_data.py - no editar a mano. */\n")
+        f.write(f"(window.HORARIO = window.HORARIO || {{}})['{anio}'] = ")
+        json.dump(datos, f, separators=(",", ":"))
+        f.write(";\n")
+
+
+def ultima_hora(clave):
+    """Ultima fecha con dato horario de `clave` en la cache (o None)."""
+    if not os.path.isdir(SALIDA_HORARIO):
+        return None
+    for nombre in sorted(os.listdir(SALIDA_HORARIO), reverse=True):
+        s = leer_horario(nombre[:4]).get(clave, {})
+        if s:
+            return d(max(s)[:10])
+    return None
+
+
+def volcar_horario(nuevo, clave_fn):
+    """Reparte {'AAAA-MM-DDTHH': valores} en la cache anual. Devuelve los anos tocados."""
+    porAnio = {}
+    for k, v in nuevo.items():
+        porAnio.setdefault(k[:4], {})[k] = v
+    for anio, filas in porAnio.items():
+        h = leer_horario(anio)
+        for k, v in filas.items():
+            for clave, valor in clave_fn(v):
+                h.setdefault(clave, {})[k] = valor
+        guardar_horario(anio, h)
+    return set(porAnio)
+
+
 def desde_para(serie, todo):
     if todo or not serie:
         return HISTORICO_DESDE
@@ -103,18 +173,43 @@ def recoger(todo=False):
         fallos.append(f"REDIAM: {e}")
         aviso(str(e))
 
-    # --- Hidrosur: cota -----------------------------------------------------
-    paso("Red Hidrosur - cota del embalse")
+    # --- Hidrosur: cota y volumen horarios ----------------------------------
+    # La tabla horaria del sensor de cota trae nivel y volumen. Se guarda todo
+    # hora a hora y de ahi sale tambien la cota diaria (lectura de las 8:00).
+    paso("Red Hidrosur - cota y volumen horarios")
+    anios_tocados = set()
     try:
-        ini = desde_para(cache["cota"], todo)
-        nuevo = hidrosur.cota_diaria(HIDROSUR_ESTACION, HIDROSUR_COTA, ini, HOY)
+        u = None if todo else ultima_hora("vol")
+        ini = HISTORICO_DESDE if u is None else u - datetime.timedelta(days=SOLAPE_DIAS)
+        nuevo = hidrosur.horaria(HIDROSUR_ESTACION, HIDROSUR_COTA, ini, HOY)
         if not nuevo and ini < HOY - datetime.timedelta(days=60):
             raise RuntimeError("sin lecturas de cota")
-        cache["cota"].update(nuevo)
-        ok(f"{len(nuevo)} dias nuevos desde {ini}; cache {len(cache['cota'])} dias")
+        anios_tocados |= volcar_horario(nuevo, lambda v: [("vol", v[1])] if len(v) > 1 else [])
+        porDia = {}
+        for k, v in nuevo.items():
+            if v[0] > 0:
+                porDia.setdefault(k[:10], {})[int(k[11:13])] = v[0]
+        for f, horas in porDia.items():
+            cache["cota"][f] = horas.get(8, horas[max(horas)])
+        ok(f"{len(nuevo)} horas desde {ini}; cota diaria en cache {len(cache['cota'])} dias")
     except Exception as e:                                        # noqa: BLE001
         fallos.append(f"Hidrosur cota: {e}")
         aviso(str(e))
+
+    paso("Red Hidrosur - lluvia horaria en la presa")
+    try:
+        ref = next(p for p in PLUVIOMETROS if p["id"] == PLUVIO_REF)
+        u = None if todo else ultima_hora("lluvia")
+        ini = HISTORICO_DESDE if u is None else u - datetime.timedelta(days=SOLAPE_DIAS)
+        nuevo = hidrosur.horaria(ref["est"], ref["id"], ini, HOY)
+        anios_tocados |= volcar_horario(nuevo, lambda v: [("lluvia", v[0])] if 0 <= v[0] < 300 else [])
+        ok(f"{len(nuevo)} horas desde {ini}")
+    except Exception as e:                                        # noqa: BLE001
+        fallos.append(f"Hidrosur lluvia horaria: {e}")
+        aviso(str(e))
+
+    if anios_tocados:
+        ok(f"horario: {len(anios_tocados)} ano(s) actualizados en data/horario/")
 
     # --- Hidrosur: pluviometria ---------------------------------------------
     paso("Red Hidrosur - pluviometria diaria")
@@ -179,6 +274,15 @@ def construir(reserva, cache, fallos):
         "porcentaje": diaria({f: x[2] for f, x in res.items()}, ini, ult),
         "capacidad": tramos,
     }
+
+    if os.path.isdir(SALIDA_HORARIO):
+        datos["horario"] = {"anios": sorted(n[:4] for n in os.listdir(SALIDA_HORARIO) if n.endswith(".js")),
+                            "sensor_lluvia": PLUVIO_REF}
+    try:
+        with open(MODELO, encoding="utf-8") as f:
+            datos["modelo"] = json.load(f)
+    except Exception:                                             # noqa: BLE001
+        pass
 
     ll = cache.get("lluvia", {})
     ini_ll = min((min(s) for s in ll.values() if s), default=ult)

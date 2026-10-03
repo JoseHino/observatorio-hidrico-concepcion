@@ -95,6 +95,39 @@ def lluvia_diaria(estacion, sensor, desde, hasta):
     return out
 
 
+def _fecha_hora(s):
+    """La tabla horaria trae el ano con dos o con cuatro cifras segun el sensor
+    (cota: 03/10/26 08:00; pluviometro: 03/10/2026 08:00)."""
+    for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%y %H:%M"):
+        try:
+            return datetime.datetime.strptime(s, fmt)
+        except ValueError:
+            pass
+    return None
+
+
+def horaria(estacion, sensor, desde, hasta):
+    """{'AAAA-MM-DDTHH': [valores numericos de la fila]}.
+
+    Cota (xxxE01): [nivel m s. n. m., volumen hm3]. Pluviometro: [mm en la hora].
+    Las horas son las de la Red Hidrosur, sin cambio de hora de verano (los
+    dias del cambio tienen 24 lecturas, no 23 ni 25)."""
+    out = {}
+    for d0, d1 in _tramos(desde, hasta):
+        for c in _tabla(_consulta(estacion, sensor, HORARIA, d0, d1)):
+            if len(c) < 5 or c[2] != sensor:
+                continue
+            t = _fecha_hora(c[3])
+            if t is None:
+                continue
+            vals = [_num(x) for x in c[4:]]
+            vals = [v for v in vals if v is not None]
+            if vals:
+                out[t.strftime("%Y-%m-%dT%H")] = vals
+        time.sleep(0.5)
+    return out
+
+
 def cota_diaria(estacion, sensor, desde, hasta, hora=8):
     """{fecha_iso: cota_msnm} tomando la lectura de las `hora`:00, que es la
     misma hora de referencia de la reserva diaria de REDIAM. Si falta esa

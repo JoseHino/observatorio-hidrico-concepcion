@@ -37,10 +37,10 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- data/data.js pipeline/cache; then
+          if git diff --quiet -- data pipeline/cache && [ -z "$(git status --porcelain data pipeline/cache)" ]; then
             echo "Sin cambios en los datos."
             exit 0
           fi
-          git add data/data.js pipeline/cache
+          git add data pipeline/cache
           git commit -m "Datos actualizados $(date -u +%Y-%m-%d)"
           git push

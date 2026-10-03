@@ -139,6 +139,7 @@
 
   var FUENTE_REDIAM = { txt: 'REDIAM · Visor de embalses de Andalucía', url: 'https://portalrediam.cica.es/embalses/' };
   var FUENTE_PLUVIO = { txt: 'Red Hidrosur · SAIH, pluviómetros', url: 'https://www.redhidrosurmedioambiente.es/saih/datos/a/la/carta' };
+  var FUENTE_HORARIO = { txt: 'Red Hidrosur · SAIH, datos horarios (016E01 y 016P01)', url: 'https://www.redhidrosurmedioambiente.es/saih/datos/a/la/carta' };
   var FUENTE_COTA = { txt: 'Red Hidrosur · SAIH, cota 016E01', url: 'https://www.redhidrosurmedioambiente.es/saih/datos/a/la/carta' };
   var chip = function (r) { return { txt: r.diario ? 'Diario' : 'Mensual', tipo: 'live' }; };
 
@@ -167,7 +168,7 @@
     var CHIP = chip(r);
     var opcionesEst = (LD.estaciones || []).map(function (e) { return { v: e.id, txt: e.nombre }; });
 
-    return {
+    var res = {
       hero: {
         valor: E.volumen, label: 'Volumen embalsado a ' + fLargo(E.fecha), formato: hm3,
         extra: [
@@ -211,40 +212,232 @@
         },
         {
           id: 'comparativa',
-          titulo: 'Volumen embalsado y precipitación',
+          titulo: 'Volumen embalsado y precipitación, hora a hora',
           sub: 'Lluvia en la presa (arriba) y volumen del embalse (abajo) sobre el mismo eje de tiempo',
-          chips: [CHIP], fuente: FUENTE_PLUVIO, ancho: 'full', alto: 'tall',
-          nota: 'Dos paneles con su propia escala, alineados en el tiempo, en lugar de dos escalas superpuestas: así se ve qué episodios de lluvia hacen subir el embalse sin falsear ninguna de las dos magnitudes. Antes de ' + (LD.inicio || '').slice(0, 4) + ' no hay registro de lluvia.'
-        }
-      ]
+          chips: [{ txt: 'Horario', tipo: 'live' }], fuente: FUENTE_HORARIO, ancho: 'full', alto: 'tall',
+          nota: 'Datos de cada hora de la Red Hidrosur (desde ' + ((D.horario || {}).anios || ['2000'])[0] + '; antes, volumen diario de REDIAM). Horas del SAIH, sin cambio de hora de verano. Dos paneles con su propia escala, alineados en el tiempo, en lugar de dos escalas superpuestas. En periodos de más de un año, la tabla y el CSV se resumen por días.'
+        },
+        tarjetaPrevision()
+      ],
+      extra: bloqueSimulador()
+    };
+    res.cards = res.cards.filter(Boolean);
+    return res;
+  }
+
+  /* ------------------------------------------------- Ecuación lluvia-volumen
+     Modelo del número de curva (SCS) ajustado por episodios de lluvia con la
+     serie histórica (pipeline/ajustar_modelo.py):
+       S  = S0 · e^(−P90/β)                         retención del suelo (mm)
+       Q  = (P − λS)² / (P + (1−λ)S)   si P > λS   escorrentía (mm)
+       ΔV = a · Q                                   subida del embalse (hm³)
+     con P la lluvia de una semana en la presa y P90 la de los 90 días previos. */
+  var MOD = D.modelo || null;
+  var MP = MOD ? MOD.parametros : null;
+
+  function subida(P, P90) {
+    if (!MP) return null;
+    var S = MP.S0 * Math.exp(-P90 / MP.beta), Ia = MP.lambda * S;
+    var Q = P > Ia ? (P - Ia) * (P - Ia) / (P + (1 - MP.lambda) * S) : 0;
+    return MP.a * Q;
+  }
+
+  /* Lluvia de los 90 días anteriores al último dato, en la presa. */
+  function lluvia90() {
+    var s = (LD.series || {})[LD.ref] || [], tot = 0, n = 0;
+    for (var i = 1; i <= 90; i++) {
+      var v = valorEn(LD.inicio, s, sumarDias(E.fecha, -i + 1));
+      if (v != null) { tot += v; n++; }
+    }
+    return n >= 80 ? tot : null;
+  }
+
+  /* Lluvia semanal que llevaría el embalse a su techo de explotación. */
+  function lluviaParaLlenar(P90) {
+    var falta = Math.min(MP.Vtecho, E.capacidad) - E.volumen;
+    if (falta <= 0) return 0;
+    var lo = 0, hi = 3000;
+    if (subida(hi, P90) < falta) return null;
+    for (var i = 0; i < 60; i++) { var m = (lo + hi) / 2; if (subida(m, P90) < falta) lo = m; else hi = m; }
+    return hi;
+  }
+
+  function tarjetaPrevision() {
+    if (!MP) return null;
+    var P90 = lluvia90() || 0;
+    /* El volumen no puede pasar del techo: lo que sobra se desembalsa. La
+       meseta de cada curva marca la lluvia a partir de la cual se llena. */
+    var techo = Math.min(MP.Vtecho, E.capacidad);
+    var lim = function (v) { return Math.round(Math.min(techo, E.volumen + v) * 100) / 100; };
+    var xs = [], hoy = [], humedo = [];
+    for (var P = 0; P <= 400; P += 10) {
+      xs.push(P + ' mm');
+      hoy.push(lim(subida(P, P90)));
+      humedo.push(lim(subida(P, 300)));
+    }
+    return {
+      id: 'prevision',
+      titulo: 'Previsión: volumen tras una semana de lluvia',
+      sub: 'Volumen esperado a partir del actual (' + F.num(E.volumen, 1) + ' hm³) según la lluvia que caiga en 7 días',
+      chips: [{ txt: 'Modelo' }], fuente: FUENTE_REDIAM, ancho: 'full',
+      nota: 'Las curvas se aplanan al llegar al techo de explotación (' + F.num(techo, 1) + ' hm³): a partir de ahí la presa desembalsa en lugar de seguir llenándose y el agua que entra sale hacia el río Verde. La misma lluvia llena mucho más el embalse con el suelo empapado que con el suelo seco.',
+      spec: {
+        type: 'line', xType: 'cat', x: xs, yFormat: 'dec1', unidad: 'hm³', desdeCero: true, zoom: false,
+        xLabel: 'Lluvia en 7 días', yMax: Math.ceil(E.capacidad / 10) * 10,
+        series: [
+          { name: 'Con la humedad actual del suelo (' + F.num(P90, 0) + ' mm en 90 días)', data: hoy },
+          { name: 'Con el suelo empapado (300 mm en 90 días)', data: humedo }
+        ]
+      }
     };
   }
 
-  /* Comparativa: el kit no tiene gráficas de dos paneles, así que se dibuja
-     aquí con ECharts y los mismos tokens de tema. Cada panel tiene SU eje Y
-     (no hay doble eje sobre los mismos datos) y comparten eje X, cruceta y zoom. */
-  var inst = null;
+  function bloqueSimulador() {
+    if (!MP) return '';
+    var P90 = lluvia90() || 0;
+    var pLlenar = lluviaParaLlenar(P90);
+    return '<div class="obs-grid"><article class="obs-card span-2 hidrico-sim">' +
+      '<div class="obs-card-head"><div class="t"><h3>Calculadora de riesgo de llenado</h3>' +
+      '<div class="cs">Escribe la lluvia prevista para los próximos 7 días en la presa (por ejemplo, la de un aviso de AEMET)</div></div></div>' +
+      '<div class="hidrico-sim-in">' +
+        '<label><span>Lluvia prevista en 7 días</span>' +
+        '<span class="hidrico-sim-campo"><input type="number" id="sim-mm" min="0" max="1000" step="5" value="100"> mm</span></label>' +
+        '<input type="range" id="sim-rango" min="0" max="400" step="5" value="100" aria-label="Lluvia prevista en 7 días">' +
+      '</div>' +
+      '<div class="hidrico-sim-out" id="sim-out"></div>' +
+      '<div class="hidrico-sim-ecu">' +
+        '<b>Ecuación</b> (número de curva del SCS, ajustada con ' + MOD.episodios + ' episodios de lluvia entre ' + MOD.desde.slice(0, 4) + ' y ' + MOD.hasta.slice(0, 4) + '):<br>' +
+        '<code>S = ' + F.num(MP.S0, 0) + ' · e<sup>−P90/' + F.num(MP.beta, 1) + '</sup></code> &nbsp;·&nbsp; ' +
+        '<code>Q = (P − ' + F.num(MP.lambda, 2) + '·S)² / (P + ' + F.num(1 - MP.lambda, 2) + '·S)</code> &nbsp;·&nbsp; ' +
+        '<code>ΔV = ' + F.num(MP.a, 3) + ' · Q</code> hm³<br>' +
+        'P: lluvia de la semana (mm) · P90: lluvia de los 90 días anteriores (mm), que mide lo húmedo que está el suelo · S: agua que el suelo es capaz de retener (mm) · Q: escorrentía (mm). ' +
+        F.num(MP.a, 3) + ' hm³ por mm de escorrentía equivale a unos ' + F.num(MP.a * 1000, 0) + ' km² de cuenca aportando. ' +
+        (pLlenar == null ? '' : 'Con la humedad actual del suelo harían falta unos <b>' + F.num(pLlenar, 0) + ' mm en una semana</b> para llevar el embalse a su techo. ') +
+        'En los años que no se usaron para ajustarla (desde 2018) explica el ' + F.num(MOD.r2_validacion * 100, 0) + ' % de la subida del embalse en cada episodio, con un error medio de ±' + F.num(MOD.error_medio_validacion_hm3, 1) + ' hm³: sirve para estimar el orden de magnitud, no sustituye a los avisos oficiales.' +
+      '</div></article></div>';
+  }
+
+  function calcularSimulador() {
+    var inp = document.getElementById('sim-mm'), out = document.getElementById('sim-out');
+    if (!inp || !out || !MP) return;
+    var P = Math.max(0, +inp.value || 0), P90 = lluvia90() || 0;
+    var dv = subida(P, P90);
+    var techo = Math.min(MP.Vtecho, E.capacidad);
+    var fin = E.volumen + dv;
+    var bajo = Math.max(0, dv + MOD.error_p10), alto = dv + MOD.error_p90;
+    var nivel, cls;
+    if (fin >= techo) { nivel = 'Superaría el techo de explotación: la presa tendría que desembalsar o verter. Conviene vigilar el río Verde aguas abajo.'; cls = 'crit'; }
+    else if (E.volumen + alto >= techo) { nivel = 'Podría acercarse al techo: es probable que haya desembalses preventivos.'; cls = 'warn'; }
+    else { nivel = 'Sin riesgo de llenado: el embalse absorbería el agua.'; cls = 'ok'; }
+    out.innerHTML =
+      '<div><div class="v">+' + F.num(dv, 1) + ' hm³</div><div class="l">Subida esperada (entre ' + F.num(bajo, 1) + ' y ' + F.num(alto, 1) + ')</div></div>' +
+      '<div><div class="v">' + F.num(Math.min(fin, techo), 1) + ' hm³</div><div class="l">Volumen final · ' + F.pct(Math.min(fin, techo) / E.capacidad * 100) + ' de llenado</div></div>' +
+      '<div><div class="v">' + F.num(Math.max(0, fin - techo), 1) + ' hm³</div><div class="l">Agua que tendría que desembalsarse</div></div>' +
+      '<div class="hidrico-sim-nivel ' + cls + '">' + nivel + '</div>';
+  }
+
+  function engancharSimulador() {
+    var inp = document.getElementById('sim-mm'), rng = document.getElementById('sim-rango');
+    if (!inp || !rng) return;
+    inp.addEventListener('input', function () { rng.value = Math.min(400, +inp.value || 0); calcularSimulador(); });
+    rng.addEventListener('input', function () { inp.value = rng.value; calcularSimulador(); });
+    calcularSimulador();
+  }
+
+  /* ----------------------------------------------- Comparativa hora a hora
+     El kit no tiene gráficas de dos paneles, así que se dibuja aquí con
+     ECharts y los mismos tokens de tema. Cada panel tiene SU eje Y (no hay
+     doble eje sobre los mismos datos) y comparten eje de tiempo, cruceta y
+     zoom. Los datos horarios van en un fichero por año (data/horario/AAAA.js)
+     y solo se descargan los del periodo elegido. */
+  var HORA = 3600000;
+  var cargados = {};
+  function cargarAnio(a) {
+    if (!cargados[a]) {
+      cargados[a] = new Promise(function (ok) {
+        if (window.HORARIO && window.HORARIO[a]) return ok();
+        var s = document.createElement('script');
+        s.src = 'data/horario/' + a + '.js';
+        s.onload = function () { ok(); };
+        s.onerror = function () { ok(); };      /* un año que falta no tumba la gráfica */
+        document.head.appendChild(s);
+      });
+    }
+    return cargados[a];
+  }
+
+  var fHora = function (ms) {
+    var d = new Date(ms);
+    return d.getUTCDate() + ' ' + MESES[d.getUTCMonth()] + ' ' + d.getUTCFullYear() + ', ' +
+      ('0' + d.getUTCHours()).slice(-2) + ':00';
+  };
+
+  /* Rótulos del eje de tiempo en español, con el detalle que pida el tramo visible. */
+  function rotuloTiempo(span) {
+    return function (ms) {
+      var d = new Date(ms), dia = d.getUTCDate(), mes = MESES[d.getUTCMonth()], an = d.getUTCFullYear();
+      if (span <= 3 * 86400000) return ('0' + d.getUTCHours()).slice(-2) + ':00' + (d.getUTCHours() === 0 ? '\n' + dia + ' ' + mes : '');
+      if (span <= 120 * 86400000) return dia + ' ' + mes;
+      if (span <= 4 * 365 * 86400000) return mes + ' ' + String(an).slice(2);
+      return String(an);
+    };
+  }
+
+  var inst = null, turno = 0;
   function dibujarComparativa() {
     var card = document.querySelector('[data-card="comparativa"]');
     var nodo = card && card.querySelector('.obs-plot');
     if (!nodo || typeof echarts === 'undefined') return;
-    var T = Obs.tema(), r = rango();
-    var ref = LD.ref || '016P01';
-    var ll = serieLluvia(ref, r), vol = serieEmbalse('volumen', r);
-    var x = etiquetas(vol);
-
+    var r = rango(), mio = ++turno;
+    var anios = ((D.horario || {}).anios || []).filter(function (a) {
+      return a >= r.desde.slice(0, 4) && a <= r.hasta.slice(0, 4);
+    });
     if (inst) { inst.dispose(); inst = null; }
+    Obs.cargando(nodo);
+    Promise.all(anios.map(cargarAnio)).then(function () {
+      if (mio !== turno) return;                 /* el usuario ya cambió de periodo */
+      pintarComparativa(nodo, r, anios);
+    });
+  }
+
+  function pintarComparativa(nodo, r, anios) {
+    var T = Obs.tema();
+    var t0 = aMs(r.desde), t1 = aMs(r.hasta) + 23 * HORA;
+    var lluvia = [], vol = [], primeraHora = Infinity;
+    anios.forEach(function (a) {
+      var H = (window.HORARIO || {})[a];
+      if (!H) return;
+      var base = Date.UTC(+a, 0, 1);
+      for (var i = 0; i < H.vol.length; i++) {
+        var t = base + i * HORA;
+        if (t < t0 || t > t1) continue;
+        if (H.vol[i] != null) { vol.push([t, H.vol[i]]); if (t < primeraHora) primeraHora = t; }
+        if (H.lluvia[i] != null) lluvia.push([t, H.lluvia[i]]);
+      }
+    });
+    /* Antes del primer dato horario, el volumen diario de REDIAM (lectura de las 8:00). */
+    var previo = [];
+    diasEntre(r.desde, r.hasta).forEach(function (f) {
+      var t = aMs(f) + 8 * HORA;
+      if (t >= primeraHora) return;
+      var v = valorEn(ED.inicio, ED.volumen || [], f);
+      if (v != null) previo.push([t, v]);
+    });
+    vol = previo.concat(vol);
+
     var previa = echarts.getInstanceByDom(nodo);
     if (previa) previa.dispose();
     nodo.innerHTML = '';
     nodo.classList.remove('is-loading');
+    if (!vol.length && !lluvia.length) { Obs.mensaje(nodo, 'vacio', 'Sin datos en el periodo elegido.'); return; }
     inst = echarts.init(nodo, null, { renderer: 'canvas', devicePixelRatio: 2 });
 
     var eje = function (i, mostrar) {
       return {
-        type: 'category', gridIndex: i, data: x, boundaryGap: true,
+        type: 'time', gridIndex: i, min: t0, max: t1,
         axisLine: { lineStyle: { color: T.axis } }, axisTick: { show: false },
-        axisLabel: { show: mostrar, color: T.mut, fontSize: 11, fontFamily: T.font, hideOverlap: true, margin: 10 },
+        axisLabel: { show: mostrar, color: T.mut, fontSize: 11, fontFamily: T.font, hideOverlap: true, margin: 10,
+                     formatter: rotuloTiempo(t1 - t0) },
         splitLine: { show: false }
       };
     };
@@ -253,21 +446,23 @@
         type: 'value', gridIndex: i, min: 0, name: nombre, splitNumber: 3,
         nameTextStyle: { color: T.mut, fontSize: 11, fontFamily: T.font, align: 'left', padding: [0, 0, 4, -40] },
         axisLine: { show: false }, axisTick: { show: false },
-        axisLabel: { color: T.mut, fontSize: 11, fontFamily: T.font, formatter: function (v) { return F.num(v, 0); } },
+        axisLabel: { color: T.mut, fontSize: 11, fontFamily: T.font, formatter: function (v) { return F.num(v, v % 1 ? 1 : 0); } },
         splitLine: { lineStyle: { color: T.grid, width: 1, type: 'solid' } }
       };
     };
     var cLl = colorLluvia();
+    var muchos = vol.length > 20000;
 
     inst.setOption({
       animation: false,
+      useUTC: true,                 /* las horas del SAIH se muestran tal cual */
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
       grid: [
         { left: 56, right: 20, top: 30, height: '26%' },
         { left: 56, right: 20, top: '44%', bottom: 86 }
       ],
       xAxis: [eje(0, false), eje(1, true)],
-      yAxis: [ejeY(0, 'Lluvia (mm)'), ejeY(1, 'Volumen (hm³)')],
+      yAxis: [ejeY(0, 'Lluvia (mm/h)'), ejeY(1, 'Volumen (hm³)')],
       tooltip: {
         trigger: 'axis', confine: true, appendToBody: true,
         backgroundColor: T.surface, borderColor: T.line, borderWidth: 1, padding: [9, 12],
@@ -277,10 +472,10 @@
         formatter: function (p) {
           var arr = Array.isArray(p) ? p : [p];
           if (!arr.length) return '';
-          return '<div style="font-weight:600;margin-bottom:5px">' + arr[0].axisValueLabel + '</div>' +
+          return '<div style="font-weight:600;margin-bottom:5px">' + fHora(arr[0].value[0]) + '</div>' +
             arr.map(function (it) {
               var u = it.seriesIndex === 0 ? ' mm' : ' hm³';
-              var v = it.value == null ? '—' : F.num(it.value, it.seriesIndex === 0 ? 1 : 2) + u;
+              var v = it.value[1] == null ? '—' : F.num(it.value[1], it.seriesIndex === 0 ? 1 : 2) + u;
               return '<div style="display:flex;gap:10px;align-items:center;margin:2px 0">' +
                 '<span style="width:9px;height:9px;border-radius:2px;background:' + it.color + ';flex:none"></span>' +
                 '<span style="color:' + T.ink2 + ';flex:1 1 auto">' + it.seriesName + '</span>' +
@@ -295,29 +490,52 @@
       dataZoom: [
         { type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 },
         { type: 'slider', xAxisIndex: [0, 1], height: 18, bottom: 30, start: 0, end: 100,
+          labelFormatter: function (v) { return fHora(v); },
           borderColor: 'transparent', backgroundColor: T.grid,
           fillerColor: 'rgba(42,120,214,.14)', handleStyle: { color: T.surface, borderColor: T.axis },
           moveHandleStyle: { color: T.axis }, textStyle: { color: T.mut, fontSize: 10, fontFamily: T.font },
           dataBackground: { lineStyle: { color: T.axis }, areaStyle: { color: T.grid } } }
       ],
       series: [
-        { name: 'Lluvia ' + (ll.mensual ? 'mensual' : 'diaria') + ' en la presa', type: 'bar',
-          xAxisIndex: 0, yAxisIndex: 0, data: ll.v, barMaxWidth: 24,
-          itemStyle: { color: cLl, borderRadius: [3, 3, 0, 0] } },
-        { name: 'Volumen embalsado', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: vol.v,
-          showSymbol: false, symbol: 'circle', symbolSize: 8,
+        { name: 'Lluvia por hora en la presa', type: 'bar', xAxisIndex: 0, yAxisIndex: 0, data: lluvia,
+          barMaxWidth: 6, barMinWidth: 1, large: true, largeThreshold: 3000,
+          itemStyle: { color: cLl } },
+        { name: 'Volumen embalsado', type: 'line', xAxisIndex: 1, yAxisIndex: 1, data: vol,
+          showSymbol: false, symbol: 'circle', symbolSize: 8, sampling: muchos ? 'lttb' : undefined,
           lineStyle: { width: 2, color: T.serie[0] }, itemStyle: { color: T.serie[0] },
           areaStyle: { color: T.serie[0], opacity: 0.10 } }
       ]
     }, true);
+    inst.on('datazoom', function () {
+      var z = inst.getOption().dataZoom[0], span = (t1 - t0) * ((z.end - z.start) / 100);
+      inst.setOption({ xAxis: [{ axisLabel: { formatter: rotuloTiempo(span) } }, { axisLabel: { formatter: rotuloTiempo(span) } }] });
+    });
 
-    /* La tabla y el CSV de la tarjeta leen esta spec, igual que en las del kit. */
+    /* Tabla y CSV de la tarjeta: hora a hora hasta un año; en periodos más
+       largos, por días (lluvia sumada, volumen de las 8:00), para no generar
+       cientos de miles de filas. */
+    var porHora = r.diario, x = [], sL = [], sV = [];
+    var mapL = {}, mapV = {};
+    lluvia.forEach(function (p) { mapL[p[0]] = p[1]; });
+    vol.forEach(function (p) { mapV[p[0]] = p[1]; });
+    if (porHora) {
+      for (var t = t0; t <= t1; t += HORA) {
+        x.push(fHora(t)); sL.push(t in mapL ? mapL[t] : null); sV.push(t in mapV ? mapV[t] : null);
+      }
+    } else {
+      diasEntre(r.desde, r.hasta).forEach(function (f) {
+        var b = aMs(f), tot = 0, n = 0;
+        for (var h = 0; h < 24; h++) { var v = mapL[b + h * HORA]; if (v != null) { tot += v; n++; } }
+        x.push(fDia(f)); sL.push(n ? Math.round(tot * 10) / 10 : null);
+        sV.push(mapV[b + 8 * HORA] != null ? mapV[b + 8 * HORA] : null);
+      });
+    }
     nodo.__obsSpec = {
-      type: 'line', xType: 'cat', x: x, xLabel: ll.mensual ? 'Mes' : 'Día', yFormat: 'dec1',
-      tablaFormato: function (v) { return v == null || !isFinite(v) ? '—' : F.num(v, 1); },
+      type: 'line', xType: 'cat', x: x, xLabel: porHora ? 'Hora' : 'Día', yFormat: 'dec1',
+      tablaFormato: function (v) { return v == null || !isFinite(v) ? '—' : F.num(v, 2); },
       series: [
-        { name: 'Lluvia en la presa (mm)', data: ll.v, color: cLl },
-        { name: 'Volumen embalsado (hm³)', data: vol.v }
+        { name: porHora ? 'Lluvia en la presa (mm/h)' : 'Lluvia en la presa (mm/día)', data: sL, color: cLl },
+        { name: 'Volumen embalsado (hm³)', data: sV }
       ]
     };
   }
@@ -330,6 +548,7 @@
   function redibujar() {
     Obs.refrescar(SECCION);
     dibujarComparativa();
+    engancharSimulador();
   }
 
   /* ----------------------------------------------------------- Arranque -- */
@@ -368,6 +587,7 @@
     });
 
     dibujarComparativa();
+    engancharSimulador();
     Obs.estado('Último dato: ' + fLargo(E.fecha), 'live');
     enganchar();
   }

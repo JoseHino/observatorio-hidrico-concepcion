@@ -1,0 +1,22 @@
+{
+  "tipo": "SCS numero de curva por episodios de 7 dias",
+  "ajustado": "2026-10-03",
+  "pluviometro": "016P01",
+  "episodios": 149,
+  "desde": "2000-01-14",
+  "hasta": "2026-04-06",
+  "umbral_3d_mm": 30,
+  "parametros": {
+    "a": 0.1882,
+    "S0": 433.0,
+    "beta": 90.7,
+    "lambda": 0.05,
+    "Vtecho": 56.39
+  },
+  "r2_total": 0.635,
+  "r2_validacion": 0.563,
+  "error_medio_validacion_hm3": 3.16,
+  "episodios_validacion": 45,
+  "error_p10": -3.35,
+  "error_p90": 4.39
+}
