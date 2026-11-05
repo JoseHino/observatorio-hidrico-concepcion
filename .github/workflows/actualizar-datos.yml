@@ -1,11 +1,12 @@
 name: Actualizar datos
 
-# Todos los días a las 08:15 UTC (10:15 en verano, 09:15 en invierno): REDIAM
-# publica la reserva de las 8:00 hora peninsular poco después. Se puede lanzar a
-# mano desde la pestaña Actions.
+# Cada 3 horas. GitHub retrasa los cron programados varias horas (el de las
+# 08:15 UTC llegaba a las 15-18 UTC), asi que con una sola pasada diaria el dia
+# anterior no quedaba completo hasta la tarde. Con 8 pasadas, la de pasada la
+# medianoche ya deja el dia anterior entero. Se puede lanzar a mano desde Actions.
 on:
   schedule:
-    - cron: "15 8 * * *"
+    - cron: "41 */3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -42,5 +43,5 @@ jobs:
             exit 0
           fi
           git add data pipeline/cache
-          git commit -m "Datos actualizados $(date -u +%Y-%m-%d)"
+          git commit -m "Datos actualizados $(date -u +%Y-%m-%dT%H:%MZ)"
           git push

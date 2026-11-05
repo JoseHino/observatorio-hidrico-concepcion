@@ -258,6 +258,25 @@ def construir(reserva, cache, fallos):
     }}
     cota = cache.get("cota", {})
     res = {f: (v, c, p) for f, v, c, p in reserva}
+
+    # REDIAM publica con retrasos de dias o semanas. El volumen horario de la
+    # Red Hidrosur a las 8:00 coincide con su reserva diaria (misma lectura del
+    # SAIH), asi que cubre los dias que REDIAM aun no ha publicado.
+    vol_h = {}
+    if os.path.isdir(SALIDA_HORARIO):
+        for nombre in sorted(os.listdir(SALIDA_HORARIO))[-2:]:
+            vol_h.update(leer_horario(nombre[:4]).get("vol", {}))
+    if vol_h:
+        datos["meta"]["ultima_hora"] = max(vol_h)
+    fuente_ult = "REDIAM"
+    if res and vol_h:
+        ult_rediam = max(res)
+        cap = res[ult_rediam][1]
+        for k, v in sorted(vol_h.items()):
+            f = k[:10]
+            if k.endswith("T08") and f > ult_rediam and v:
+                res[f] = (v, cap, round(v / cap * 100, 2))
+                fuente_ult = "Red Hidrosur"
     if not res:
         return datos
 
@@ -266,6 +285,7 @@ def construir(reserva, cache, fallos):
     datos["embalse"] = {
         "fecha": ult, "volumen": v, "capacidad": c, "porcentaje": p,
         "cota": cota.get(ult) or (cota[max(cota)] if cota else None),
+        "fuente": fuente_ult,
     }
     datos["meta"]["ultimo_periodo"] = ult
 

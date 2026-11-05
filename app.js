@@ -550,7 +550,7 @@
       }],
       actualizado: (D.meta || {}).actualizado,
       fuentes: [FUENTE_VOL, FUENTE_PLUVIO, FUENTE_REDIAM, FUENTE_COTA],
-      metodologia: 'Cada mañana un proceso automático en GitHub Actions descarga de la Red Hidrosur el volumen del embalse y la lluvia de cada pluviómetro hora a hora (desde 2000), y de REDIAM la reserva diaria (desde 1970), y publica la serie completa. ' +
+      metodologia: 'Cada 3 horas un proceso automático en GitHub Actions descarga de la Red Hidrosur el volumen del embalse y la lluvia de cada pluviómetro hora a hora (desde 2000), y de REDIAM la reserva diaria (desde 1970); los días que REDIAM aún no ha publicado se completan con el volumen de Hidrosur a las 8:00, que es la misma lectura. ' +
         'Cada gráfica permite ver sus datos en tabla y descargarlos en CSV.',
       pie: 'Los datos son de las fuentes citadas; su tratamiento y presentación, de este observatorio. ' +
         'Los datos en tiempo real del SAIH son provisionales y pueden corregirse después de su publicación.'
@@ -558,7 +558,8 @@
 
     dibujarHorarias();
     engancharSimulador();
-    Obs.estado('Último dato: ' + fLargo(E.fecha), 'live');
+    var uh = (D.meta || {}).ultima_hora;
+    Obs.estado('Último dato: ' + (uh ? fLargo(uh.slice(0, 10)) + ', ' + uh.slice(11, 13) + ':00 h' : fLargo(E.fecha)), 'live');
 
     document.getElementById('hidrico-periodo').addEventListener('change', function () {
       estado.periodo = this.value;
