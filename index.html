@@ -57,9 +57,10 @@
 <script src="assets/obs-charts.js"></script>
 <script src="assets/obs-ui.js"></script>
 <!-- Datos (los escribe pipeline/build_data.py) -->
-<script src="data/data.js"></script>
+<!-- Se pide con ?v= cambiante para que el navegador no sirva una copia vieja de los datos. -->
+<script>document.write('<script src="data/data.js?v=' + Date.now() + '"><\/script>');</script>
 <!-- Declaración de ESTE observatorio -->
-<script src="app.js"></script>
+<script>document.write('<script src="app.js?v=' + ((window.DATOS && DATOS.meta && DATOS.meta.actualizado) || Date.now()) + '"><\/script>');</script>
 
 </body>
 </html>

@@ -101,7 +101,7 @@
       cargados[a] = new Promise(function (ok) {
         if (window.HORARIO && window.HORARIO[a]) return ok();
         var s = document.createElement('script');
-        s.src = 'data/horario/' + a + '.js';
+        s.src = 'data/horario/' + a + '.js?v=' + encodeURIComponent((D.meta || {}).actualizado || Date.now());
         s.onload = function () { ok(); };
         s.onerror = function () { ok(); };      /* un año que falta no tumba las gráficas */
         document.head.appendChild(s);
