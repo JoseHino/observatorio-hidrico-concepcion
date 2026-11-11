@@ -1,12 +1,14 @@
 name: Actualizar datos
 
-# Cada 3 horas. GitHub retrasa los cron programados varias horas (el de las
-# 08:15 UTC llegaba a las 15-18 UTC), asi que con una sola pasada diaria el dia
-# anterior no quedaba completo hasta la tarde. Con 8 pasadas, la de pasada la
-# medianoche ya deja el dia anterior entero. Se puede lanzar a mano desde Actions.
+# Cada 15 minutos. Red Hidrosur publica la cota y la lluvia hora a hora, pero
+# GitHub se salta muchas pasadas programadas: con el cron cada 3 h solo llegaban
+# 3-4 al dia y la web se quedaba 6-10 h atrasada. Lanzando cada 15 min, aunque
+# GitHub descarte la mitad, entra el dato de cada hora poco despues de
+# publicarse. Cada pasada dura ~40 s y solo hace commit si hay datos nuevos.
+# Se puede lanzar a mano desde Actions.
 on:
   schedule:
-    - cron: "41 */3 * * *"
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 permissions:
