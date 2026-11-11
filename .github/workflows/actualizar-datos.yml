@@ -5,7 +5,13 @@ name: Actualizar datos
 # 3-4 al dia y la web se quedaba 6-10 h atrasada. Lanzando cada 15 min, aunque
 # GitHub descarte la mitad, entra el dato de cada hora poco despues de
 # publicarse. Cada pasada dura ~40 s y solo hace commit si hay datos nuevos.
-# Se puede lanzar a mano desde Actions.
+#
+# Aun asi GitHub puede pasar horas sin lanzar ninguna (el 11-11-2026 no lanzo
+# ninguna en 80 min tras el cambio). Por eso cada pasada, al acabar, espera
+# ~14 min y lanza la siguiente ella misma (workflow_dispatch con GITHUB_TOKEN).
+# El cron queda de respaldo: si la cadena se rompe, la vuelve a arrancar.
+# El grupo de concurrencia deja solo 1 en marcha + 1 en espera, asi que las
+# cadenas no se multiplican. Se puede lanzar a mano desde Actions.
 on:
   schedule:
     - cron: "7,22,37,52 * * * *"
@@ -13,6 +19,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: actualizar-datos
@@ -47,3 +54,13 @@ jobs:
           git add data pipeline/cache
           git commit -m "Datos actualizados $(date -u +%Y-%m-%dT%H:%MZ)"
           git push
+
+      - name: Encadenar la siguiente pasada
+        # Tambien si el colector ha fallado: un fallo puntual de Hidrosur no
+        # debe parar la cadena. No se ejecuta si la pasada se cancela.
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 840
+          gh workflow run actualizar-datos.yml -R "$GITHUB_REPOSITORY" --ref main
